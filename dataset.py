@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 
 # logger.set_log_level('ERROR')
 fastf1.ergast.interface.BASE_URL = "https://api.jolpi.ca/ergast/f1"  # type: ignore
-
+#TODO: Add offline option to use cached data
 
 def track_time(func: Callable) -> Callable:
     @wraps(func)
@@ -207,12 +207,8 @@ def process_stint(session, driver, stint_number):
         results = {
             "Driver": driver,
             "Stint": stint_number,
-            "mean_brake_time": np.mean(lap_brake_durations)
-            if lap_brake_durations
-            else np.nan,
-            "std_brake_time": np.std(lap_brake_durations)
-            if lap_brake_durations
-            else np.nan,
+            "mean_brake_time": np.mean(lap_brake_durations) if lap_brake_durations else np.nan,
+            "std_brake_time": np.std(lap_brake_durations) if lap_brake_durations else np.nan,
             "AvgSpeed": np.mean(lap_avg_speeds) if lap_avg_speeds else np.nan,
             "StdSpeed": np.std(lap_avg_speeds) if lap_avg_speeds else np.nan,
             "AvgSpeedDelta": np.mean(lap_speed_deltas) if lap_speed_deltas else np.nan,
