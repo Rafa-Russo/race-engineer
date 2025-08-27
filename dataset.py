@@ -14,6 +14,32 @@ import matplotlib.pyplot as plt
 fastf1.ergast.interface.BASE_URL = "https://api.jolpi.ca/ergast/f1"  # type: ignore
 #TODO: Add offline option to use cached data
 
+#NOTE: These corrections will be resolved by just the ffill function, but I registered them here for clarity
+corrections = {
+    "2022": {
+        "Austrian Grand Prix": {
+            "ALB": "HARD",
+            "BOT": "HARD",
+            "GAS": "HARD",
+            "LAT": "HARD",
+            "MAG": "HARD",
+            "MSC": "HARD",
+            "NOR": "HARD",
+            "OCO": "HARD",
+            "RIC": "HARD",
+            "RUS": "HARD",
+            "SAI": "HARD",
+            "VET": "MEDIUM",
+        },
+        "Monaco Grand Prix": {"STR": "HARD"},
+    },
+    '2023': {
+        'Canadian Grand Prix': {
+            'TSU': 'HARD'
+        }
+    }
+}
+
 def track_time(func: Callable) -> Callable:
     @wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -101,9 +127,12 @@ def add_team_info(session, stints_df):
 
 @track_time
 def get_stints_race(session):
-    laps = session.laps
-    drivers = session.drivers
-    drivers = [session.get_driver(driver)["Abbreviation"] for driver in drivers]
+    laps = session.laps.copy()
+    # Forward-fill missing 'Compound' values for each driver. This handles cases
+    # where compound data is missing for some laps within a stint, assuming
+    # the compound remains the same as the last known value.
+    laps["Compound"] = laps.groupby("Driver")["Compound"].transform("ffill")
+
     stints = laps[["Driver", "Stint", "Compound", "LapNumber"]]
     stints = stints.groupby(["Driver", "Stint", "Compound"])
     stints = stints.count().reset_index()
@@ -298,7 +327,7 @@ def main(year_start, year_end):
 
 
 if __name__ == "__main__":
-    YEAR_START = 2019
-    YEAR_END = 2024
+    YEAR_START = 2025
+    YEAR_END = 2026
 
     main(YEAR_START, YEAR_END)
