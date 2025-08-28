@@ -16,7 +16,8 @@ This approach reframes the problem from a multi-class one to a multi-label one. 
     -   The `CompoundStrategy` column would be transformed into a binary matrix where each column represents a compound (e.g., `SOFT`, `MEDIUM`, `HARD`).
     -   For each race, a `1` indicates a compound was used, and `0` otherwise.
 -   **Modeling:**
-    -   A multi-label classifier (e.g., `RandomForestClassifier` with multi-label support, or a one-vs-rest approach) would be trained to predict which compounds will be used in the race.
+    -   A multi-label classifi
+    er (e.g., `RandomForestClassifier` with multi-label support, or a one-vs-rest approach) would be trained to predict which compounds will be used in the race.
 -   **Stint Length Prediction:**
     -   Separate regression models can be trained for each compound type to predict its stint length.
     -   These models would take the original features plus the predicted compounds as input.
@@ -80,3 +81,38 @@ For a more advanced approach, Recurrent Neural Networks (RNNs), particularly LST
     -   Requires a larger dataset for effective training.
     -   Significantly more complex to build, train, and interpret than other methods.
     -   May be overkill if simpler models provide sufficient performance.
+
+---
+
+## 5. Independent Compound Models
+
+This approach uses an ensemble of tree-based models, where each model is responsible for predicting the usage of a single compound. Unlike a stacked or chained architecture, these models are trained and predict independently.
+
+-   **Modeling:**
+    -   Train a separate classifier (e.g., `XGBoost`, `RandomForest`) for each available tyre compound (`SOFT`, `MEDIUM`, `HARD`, etc.).
+    -   Each model predicts whether its corresponding compound will be used in the race (`1` or `0`).
+-   **Stint Length Prediction:**
+    -   Similar to the multi-label approach, separate regression models can be trained to predict the stint length for each compound, conditioned on the compound being used.
+-   **Pros:**
+    -   Simple to implement and parallelize.
+    -   Isolates the prediction for each compound, making the models easier to analyze.
+-   **Cons:**
+    -   Does not model the explicit dependencies between compound choices (e.g., choosing `SOFT` might decrease the likelihood of a one-stop race, thus affecting `HARD` tyre usage).
+
+---
+
+## 6. Strategy-Segmented Chained Models
+
+This approach builds on the "Chained Predictions" (Method 2) by first segmenting the data based on the number of stops and then training a chained model for each segment.
+
+-   **Modeling:**
+    1.  **Data Segmentation:** Split the dataset into subsets based on the number of stops in the strategy (e.g., one-stop races, two-stop races).
+    2.  **Chained Models per Segment:** For each segment, train a separate chained prediction model as described in Method 2.
+        -   The model for two-stop strategies would have a chain for Stint 1 and Stint 2.
+        -   The model for three-stop strategies would have a chain for Stint 1, Stint 2, and Stint 3.
+-   **Pros:**
+    -   Creates more specialized models that can capture the distinct patterns of different stop strategies.
+    -   Prevents aggressive, multi-stop strategies (e.g., starting on `SOFT`) from unduly influencing the models for conservative one-stop strategies.
+-   **Cons:**
+    -   Requires a pre-classification step to determine the number of stops, which can introduce errors.
+    -   Reduces the amount of data available for training each individual model.
