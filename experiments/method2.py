@@ -102,7 +102,7 @@ y1_compound_le = LabelEncoder()
 y_train_stint1_compound = y1_compound_le.fit_transform(y_train['Stint1_Compound'])
 stint1_compound_model = Pipeline(steps=[('preprocessor', base_preprocessor),
                                         ('classifier', RandomForestClassifier(random_state=42))])
-stint1_compound_model.fit(X_train, y_train_stint1_compound)
+stint1_compound_model.fit(X_train, np.asarray(y_train_stint1_compound, dtype=int))
 
 # Length
 stint1_length_model = Pipeline(steps=[('preprocessor', base_preprocessor),
@@ -132,7 +132,7 @@ y2_compound_le = LabelEncoder()
 y_train_stint2_compound = y2_compound_le.fit_transform(y_train['Stint2_Compound'])
 stint2_compound_model = Pipeline(steps=[('preprocessor', stint2_preprocessor),
                                         ('classifier', RandomForestClassifier(random_state=42))])
-stint2_compound_model.fit(X_train_stint2, y_train_stint2_compound)
+stint2_compound_model.fit(X_train_stint2, np.asarray(y_train_stint2_compound, dtype=int))
 
 # Length
 stint2_length_model = Pipeline(steps=[('preprocessor', stint2_preprocessor),
@@ -165,7 +165,7 @@ y3_compound_le = LabelEncoder()
 y_train_stint3_compound = y3_compound_le.fit_transform(y_train_stint3['Stint3_Compound'])
 stint3_compound_model = Pipeline(steps=[('preprocessor', stint3_preprocessor),
                                         ('classifier', RandomForestClassifier(random_state=42))])
-stint3_compound_model.fit(X_train_stint3, y_train_stint3_compound)
+stint3_compound_model.fit(X_train_stint3, np.asarray(y_train_stint3_compound, dtype=int))
 
 # Length
 stint3_length_model = Pipeline(steps=[('preprocessor', stint3_preprocessor),
@@ -183,7 +183,7 @@ def predict_strategy(X_row):
     # Predict Stint 1
     s1_compound_encoded = stint1_compound_model.predict(X_row)[0]
     s1_compound = y1_compound_le.inverse_transform([s1_compound_encoded])[0]
-    s1_length = stint1_length_model.predict(X_row)[0]
+    s1_length = float(stint1_length_model.predict(X_row)[0])
 
     strategy = [(s1_compound, round(s1_length))]
 
@@ -194,7 +194,7 @@ def predict_strategy(X_row):
     
     s2_compound_encoded = stint2_compound_model.predict(X_row_s2)[0]
     s2_compound = y2_compound_le.inverse_transform([s2_compound_encoded])[0]
-    s2_length = stint2_length_model.predict(X_row_s2)[0]
+    s2_length = float(stint2_length_model.predict(X_row_s2)[0])
     strategy.append((s2_compound, round(s2_length)))
 
     if num_stints > 2:
@@ -205,7 +205,7 @@ def predict_strategy(X_row):
 
         s3_compound_encoded = stint3_compound_model.predict(X_row_s3)[0]
         s3_compound = y3_compound_le.inverse_transform([s3_compound_encoded])[0]
-        s3_length = stint3_length_model.predict(X_row_s3)[0]
+        s3_length = float(stint3_length_model.predict(X_row_s3)[0])
         strategy.append((s3_compound, round(s3_length)))
         
     return num_stints, strategy
@@ -276,7 +276,7 @@ for i in range(1, true_stints + 1):
     length = y_test.iloc[example_index][f'Stint{i}_Length']
     if pd.notna(compound):
         true_strategy_compounds.append(compound)
-        true_strategy_lengths.append(round(length))
+        true_strategy_lengths.append(round(float(length)))
 
 pred_stints, pred_strategy = predict_strategy(example_race)
 
