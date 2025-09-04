@@ -20,7 +20,8 @@ import numpy as np
 import ast
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.preprocessing import OneHotEncoder, LabelEncoder
+from sklearn.svm import SVC, SVR
+from sklearn.preprocessing import OneHotEncoder, LabelEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import classification_report, accuracy_score, mean_absolute_error
@@ -43,8 +44,8 @@ class Colors:
     UNDERLINE = '\033[4m'
 
 # --- 0. Model Selection ---
-# Choose from 'RandomForest', 'XGBoost', 'CatBoost'
-SELECTED_MODEL = 'RandomForest'
+# Choose from 'RandomForest', 'XGBoost', 'CatBoost', 'SVM'
+SELECTED_MODEL = 'SVM'
 
 models = {
     'RandomForest': {
@@ -58,6 +59,10 @@ models = {
     'CatBoost': {
         'classifier': cb.CatBoostClassifier(random_state=42, verbose=0),
         'regressor': cb.CatBoostRegressor(random_state=42, verbose=0)
+    },
+    'SVM': {
+        'classifier': SVC(random_state=42, probability=True),  # probability=True for compatibility
+        'regressor': SVR()
     }
 }
 
@@ -103,17 +108,34 @@ X_train, X_test, y_train, y_test = train_test_split(
 
 # --- 3. Train Initial Classifier for Number of Stints ---
 print(f"{Colors.OKBLUE}--- Training Model for Number of Stints ---{Colors.ENDC}")
-base_preprocessor = ColumnTransformer(
-    transformers=[
-        ('num', 'passthrough', numerical_features),
-        ('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False), categorical_features)
-    ],
-    remainder='passthrough'
-)
-stint_model = Pipeline(steps=[('preprocessor', base_preprocessor), ('classifier', classifier)])
+# Define master categories to ensure all encoders are consistent
+all_circuits = sorted(df['Circuit'].unique())
+all_teams = sorted(df['Team'].unique())
+all_compounds = sorted(list(set(c for strategy in df['CompoundStrategy'] for c in strategy)))
+
+def create_base_preprocessor():
+    if SELECTED_MODEL == 'SVM':
+        # SVM requires feature scaling
+        return ColumnTransformer(
+            transformers=[
+                ('num', StandardScaler(), numerical_features),
+                ('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False, categories=[all_circuits, all_teams]), categorical_features)
+            ],
+            remainder='passthrough'
+        )
+    else:
+        return ColumnTransformer(
+            transformers=[
+                ('num', 'passthrough', numerical_features),
+                ('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False, categories=[all_circuits, all_teams]), categorical_features)
+            ],
+            remainder='passthrough'
+        )
+
+stint_model = Pipeline(steps=[('preprocessor', create_base_preprocessor()), ('classifier', SVC(random_state=42, probability=True))])
 y_train_stints = y_train['NumberOfStints']
 le_stints = LabelEncoder().fit(y['NumberOfStints'])
-if SELECTED_MODEL in ['XGBoost', 'CatBoost']:
+if SELECTED_MODEL in ['XGBoost', 'CatBoost', 'SVM']:
     y_train_stints = le_stints.transform(y_train_stints)
 stint_model.fit(X_train, y_train_stints)
 
@@ -135,10 +157,11 @@ for num_stints_segment in [2, 3]:
     # --- Stint 1 Models ---
     y1_compound_le = LabelEncoder().fit(y_train_segment['Stint1_Compound'])
     y_train_stint1_compound = y1_compound_le.transform(y_train_segment['Stint1_Compound'])
-    stint1_compound_model = Pipeline(steps=[('preprocessor', base_preprocessor), ('classifier', classifier)])
+    stint1_compound_model = Pipeline(steps=[('preprocessor', create_base_preprocessor()), ('classifier', SVC(random_state=42, probability=True))])
     stint1_compound_model.fit(X_train_segment, y_train_stint1_compound)
+    #NOTE: Uma mudança no comportamento do modelo começa aqui
 
-    stint1_length_model = Pipeline(steps=[('preprocessor', base_preprocessor), ('regressor', regressor)])
+    stint1_length_model = Pipeline(steps=[('preprocessor', create_base_preprocessor()), ('regressor', SVR())])
     stint1_length_model.fit(X_train_segment, y_train_segment['Stint1_Length'])
 
     models_for_segment['stint1_compound_model'] = stint1_compound_model
@@ -152,20 +175,33 @@ for num_stints_segment in [2, 3]:
 
     stint2_cat_features = categorical_features + ['Stint1_Compound']
     stint2_num_features = numerical_features + ['Stint1_Length']
-    stint2_preprocessor = ColumnTransformer(
-        transformers=[
-            ('num', 'passthrough', stint2_num_features),
-            ('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False), stint2_cat_features)
-        ],
-        remainder='passthrough'
-    )
+    
+    def create_stint2_preprocessor():
+        if SELECTED_MODEL == 'SVM':
+            return ColumnTransformer(
+                transformers=[
+                    ('num', StandardScaler(), stint2_num_features),
+                    ('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False, categories=[all_circuits, all_teams, all_compounds]), stint2_cat_features)
+                ],
+                remainder='passthrough'
+            )
+        else:
+            return ColumnTransformer(
+                transformers=[
+                    ('num', 'passthrough', stint2_num_features),
+                    ('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False, categories=[all_circuits, all_teams, all_compounds]), stint2_cat_features)
+                ],
+                remainder='passthrough'
+            )
+    
+    stint2_preprocessor = create_stint2_preprocessor()
 
     y2_compound_le = LabelEncoder().fit(y_train_segment['Stint2_Compound'])
     y_train_stint2_compound = y2_compound_le.transform(y_train_segment['Stint2_Compound'])
-    stint2_compound_model = Pipeline(steps=[('preprocessor', stint2_preprocessor), ('classifier', classifier)])
+    stint2_compound_model = Pipeline(steps=[('preprocessor', stint2_preprocessor), ('classifier', SVC(random_state=42, probability=True))])
     stint2_compound_model.fit(X_train_stint2, y_train_stint2_compound)
 
-    stint2_length_model = Pipeline(steps=[('preprocessor', stint2_preprocessor), ('regressor', regressor)])
+    stint2_length_model = Pipeline(steps=[('preprocessor', stint2_preprocessor), ('regressor', SVR())])
     stint2_length_model.fit(X_train_stint2, y_train_segment['Stint2_Length'])
 
     models_for_segment['stint2_compound_model'] = stint2_compound_model
@@ -180,20 +216,33 @@ for num_stints_segment in [2, 3]:
 
         stint3_cat_features = categorical_features + ['Stint1_Compound', 'Stint2_Compound']
         stint3_num_features = numerical_features + ['Stint1_Length', 'Stint2_Length']
-        stint3_preprocessor = ColumnTransformer(
-            transformers=[
-                ('num', 'passthrough', stint3_num_features),
-                ('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False), stint3_cat_features)
-            ],
-            remainder='passthrough'
-        )
+        
+        def create_stint3_preprocessor():
+            if SELECTED_MODEL == 'SVM':
+                return ColumnTransformer(
+                    transformers=[
+                        ('num', StandardScaler(), stint3_num_features),
+                        ('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False, categories=[all_circuits, all_teams, all_compounds, all_compounds]), stint3_cat_features)
+                    ],
+                    remainder='passthrough'
+                )
+            else:
+                return ColumnTransformer(
+                    transformers=[
+                        ('num', 'passthrough', stint3_num_features),
+                        ('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False, categories=[all_circuits, all_teams, all_compounds, all_compounds]), stint3_cat_features)
+                    ],
+                    remainder='passthrough'
+                )
+        
+        stint3_preprocessor = create_stint3_preprocessor()
 
         y3_compound_le = LabelEncoder().fit(y_train_segment['Stint3_Compound'])
         y_train_stint3_compound = y3_compound_le.transform(y_train_segment['Stint3_Compound'])
-        stint3_compound_model = Pipeline(steps=[('preprocessor', stint3_preprocessor), ('classifier', classifier)])
+        stint3_compound_model = Pipeline(steps=[('preprocessor', stint3_preprocessor), ('classifier', SVC(random_state=42, probability=True))])
         stint3_compound_model.fit(X_train_stint3, y_train_stint3_compound)
 
-        stint3_length_model = Pipeline(steps=[('preprocessor', stint3_preprocessor), ('regressor', regressor)])
+        stint3_length_model = Pipeline(steps=[('preprocessor', stint3_preprocessor), ('regressor', SVR())])
         stint3_length_model.fit(X_train_stint3, y_train_segment['Stint3_Length'])
 
         models_for_segment['stint3_compound_model'] = stint3_compound_model
@@ -208,7 +257,7 @@ def predict_strategy(X_row):
     """Predicts the full strategy for a single race instance."""
     # Predict number of stints to select the correct model chain
     pred = stint_model.predict(X_row)[0]
-    num_stints = le_stints.inverse_transform([int(pred)])[0] if SELECTED_MODEL in ['XGBoost', 'CatBoost'] else pred
+    num_stints = le_stints.inverse_transform([int(pred)])[0] if SELECTED_MODEL in ['XGBoost', 'CatBoost', 'SVM'] else pred
 
     # Select the appropriate chained model
     model_chain = chained_models[num_stints]
