@@ -18,7 +18,7 @@ This approach builds on the \"Chained Predictions\" (Method 2) by first segmenti
 import pandas as pd
 import numpy as np
 import ast
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.svm import SVC, SVR
 from sklearn.preprocessing import OneHotEncoder, LabelEncoder, StandardScaler
@@ -43,32 +43,59 @@ class Colors:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
 
-# --- 0. Model Selection ---
+# --- 0. Model and Hyperparameter Configuration ---
 # Choose from 'RandomForest', 'XGBoost', 'CatBoost', 'SVM'
-SELECTED_MODEL = 'SVM'
+SELECTED_MODEL = 'RandomForest'
+USE_GRID_SEARCH = True # Set to False to use default parameters
 
-models = {
+model_configs = {
     'RandomForest': {
         'classifier': RandomForestClassifier(random_state=42),
-        'regressor': RandomForestRegressor(random_state=42)
+        'regressor': RandomForestRegressor(random_state=42),
+        'param_grid': {
+            'classifier__n_estimators': [50, 100],
+            'classifier__max_depth': [10, 20],
+            'regressor__n_estimators': [50, 100],
+            'regressor__max_depth': [10, 20],
+        }
     },
     'XGBoost': {
         'classifier': xgb.XGBClassifier(random_state=42, use_label_encoder=False, eval_metric='mlogloss'),
-        'regressor': xgb.XGBRegressor(random_state=42)
+        'regressor': xgb.XGBRegressor(random_state=42),
+        'param_grid': {
+            'classifier__n_estimators': [50, 100],
+            'classifier__learning_rate': [0.05, 0.1],
+            'regressor__n_estimators': [50, 100],
+            'regressor__learning_rate': [0.05, 0.1],
+        }
     },
     'CatBoost': {
         'classifier': cb.CatBoostClassifier(random_state=42, verbose=0),
-        'regressor': cb.CatBoostRegressor(random_state=42, verbose=0)
+        'regressor': cb.CatBoostRegressor(random_state=42, verbose=0),
+        'param_grid': {
+            'classifier__iterations': [50, 100],
+            'classifier__depth': [4, 6],
+            'regressor__iterations': [50, 100],
+            'regressor__depth': [4, 6],
+        }
     },
     'SVM': {
-        'classifier': SVC(random_state=42, probability=True),  # probability=True for compatibility
-        'regressor': SVR()
+        'classifier': SVC(random_state=42, probability=True),
+        'regressor': SVR(),
+        'param_grid': {
+            'classifier__C': [0.1, 1, 10],
+            'classifier__gamma': ['scale', 'auto'],
+            'regressor__C': [0.1, 1, 10],
+            'regressor__epsilon': [0.1, 0.2],
+        }
     }
 }
 
 print(f"{Colors.HEADER}--- Using {SELECTED_MODEL} models ---{Colors.ENDC}")
-classifier = models[SELECTED_MODEL]['classifier']
-regressor = models[SELECTED_MODEL]['regressor']
+config = model_configs[SELECTED_MODEL]
+classifier = config['classifier']
+regressor = config['regressor']
+param_grid = config['param_grid']
 
 
 # --- 1. Load and Preprocess Data ---
@@ -132,12 +159,32 @@ def create_base_preprocessor():
             remainder='passthrough'
         )
 
-stint_model = Pipeline(steps=[('preprocessor', create_base_preprocessor()), ('classifier', SVC(random_state=42, probability=True))])
+def train_model_with_grid_search(pipeline, X_train, y_train, model_type):
+    if USE_GRID_SEARCH:
+        grid = {k: v for k, v in param_grid.items() if k.startswith(model_type)}
+        if not grid:
+            model = pipeline
+        else:
+            scoring = 'accuracy' if model_type == 'classifier' else 'neg_mean_absolute_error'
+            print(f"--- Performing GridSearchCV for {model_type} ---")
+            model = GridSearchCV(pipeline, grid, cv=3, n_jobs=-1, scoring=scoring)
+    else:
+        model = pipeline
+    
+    model.fit(X_train, y_train)
+    
+    if USE_GRID_SEARCH and grid:
+        print(f"Best params: {model.best_params_}")
+        
+    return model
+
+stint_model_pipeline = Pipeline(steps=[('preprocessor', create_base_preprocessor()), ('classifier', classifier)])
 y_train_stints = y_train['NumberOfStints']
 le_stints = LabelEncoder().fit(y['NumberOfStints'])
 if SELECTED_MODEL in ['XGBoost', 'CatBoost', 'SVM']:
     y_train_stints = le_stints.transform(y_train_stints)
-stint_model.fit(X_train, y_train_stints)
+
+stint_model = train_model_with_grid_search(stint_model_pipeline, X_train, y_train_stints, 'classifier')
 
 
 # --- 4. Train Segmented Chained Models ---
@@ -157,12 +204,11 @@ for num_stints_segment in [2, 3]:
     # --- Stint 1 Models ---
     y1_compound_le = LabelEncoder().fit(y_train_segment['Stint1_Compound'])
     y_train_stint1_compound = y1_compound_le.transform(y_train_segment['Stint1_Compound'])
-    stint1_compound_model = Pipeline(steps=[('preprocessor', create_base_preprocessor()), ('classifier', SVC(random_state=42, probability=True))])
-    stint1_compound_model.fit(X_train_segment, y_train_stint1_compound)
-    #NOTE: Uma mudança no comportamento do modelo começa aqui
+    stint1_compound_pipeline = Pipeline(steps=[('preprocessor', create_base_preprocessor()), ('classifier', classifier)])
+    stint1_compound_model = train_model_with_grid_search(stint1_compound_pipeline, X_train_segment, y_train_stint1_compound, 'classifier')
 
-    stint1_length_model = Pipeline(steps=[('preprocessor', create_base_preprocessor()), ('regressor', SVR())])
-    stint1_length_model.fit(X_train_segment, y_train_segment['Stint1_Length'])
+    stint1_length_pipeline = Pipeline(steps=[('preprocessor', create_base_preprocessor()), ('regressor', regressor)])
+    stint1_length_model = train_model_with_grid_search(stint1_length_pipeline, X_train_segment, y_train_segment['Stint1_Length'], 'regressor')
 
     models_for_segment['stint1_compound_model'] = stint1_compound_model
     models_for_segment['stint1_length_model'] = stint1_length_model
@@ -198,11 +244,11 @@ for num_stints_segment in [2, 3]:
 
     y2_compound_le = LabelEncoder().fit(y_train_segment['Stint2_Compound'])
     y_train_stint2_compound = y2_compound_le.transform(y_train_segment['Stint2_Compound'])
-    stint2_compound_model = Pipeline(steps=[('preprocessor', stint2_preprocessor), ('classifier', SVC(random_state=42, probability=True))])
-    stint2_compound_model.fit(X_train_stint2, y_train_stint2_compound)
+    stint2_compound_pipeline = Pipeline(steps=[('preprocessor', stint2_preprocessor), ('classifier', classifier)])
+    stint2_compound_model = train_model_with_grid_search(stint2_compound_pipeline, X_train_stint2, y_train_stint2_compound, 'classifier')
 
-    stint2_length_model = Pipeline(steps=[('preprocessor', stint2_preprocessor), ('regressor', SVR())])
-    stint2_length_model.fit(X_train_stint2, y_train_segment['Stint2_Length'])
+    stint2_length_pipeline = Pipeline(steps=[('preprocessor', stint2_preprocessor), ('regressor', regressor)])
+    stint2_length_model = train_model_with_grid_search(stint2_length_pipeline, X_train_stint2, y_train_segment['Stint2_Length'], 'regressor')
 
     models_for_segment['stint2_compound_model'] = stint2_compound_model
     models_for_segment['stint2_length_model'] = stint2_length_model
@@ -239,11 +285,11 @@ for num_stints_segment in [2, 3]:
 
         y3_compound_le = LabelEncoder().fit(y_train_segment['Stint3_Compound'])
         y_train_stint3_compound = y3_compound_le.transform(y_train_segment['Stint3_Compound'])
-        stint3_compound_model = Pipeline(steps=[('preprocessor', stint3_preprocessor), ('classifier', SVC(random_state=42, probability=True))])
-        stint3_compound_model.fit(X_train_stint3, y_train_stint3_compound)
+        stint3_compound_pipeline = Pipeline(steps=[('preprocessor', stint3_preprocessor), ('classifier', classifier)])
+        stint3_compound_model = train_model_with_grid_search(stint3_compound_pipeline, X_train_stint3, y_train_stint3_compound, 'classifier')
 
-        stint3_length_model = Pipeline(steps=[('preprocessor', stint3_preprocessor), ('regressor', SVR())])
-        stint3_length_model.fit(X_train_stint3, y_train_segment['Stint3_Length'])
+        stint3_length_pipeline = Pipeline(steps=[('preprocessor', stint3_preprocessor), ('regressor', regressor)])
+        stint3_length_model = train_model_with_grid_search(stint3_length_pipeline, X_train_stint3, y_train_segment['Stint3_Length'], 'regressor')
 
         models_for_segment['stint3_compound_model'] = stint3_compound_model
         models_for_segment['stint3_length_model'] = stint3_length_model
