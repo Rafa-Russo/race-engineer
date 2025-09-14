@@ -116,3 +116,22 @@ This approach builds on the "Chained Predictions" (Method 2) by first segmenting
 -   **Cons:**
     -   Requires a pre-classification step to determine the number of stops, which can introduce errors.
     -   Reduces the amount of data available for training each individual model.
+
+---
+
+## 7. Explicit Chained Models with Compound Prediction
+
+This method refines the "Strategy-Segmented Chained Models" (Method 6) by making the compound prediction for subsequent stints an explicit step in the chain.
+
+-   **Modeling:**
+    -   This approach follows the same data segmentation and chained structure as Method 6.
+    -   However, for each subsequent stint (e.g., Stint 2), the prediction is a two-step process:
+        1.  **Predict Compound:** A dedicated classifier predicts the tyre compound for the current stint, using features from the initial race conditions and all previous predicted stints.
+        2.  **Predict Stint Length:** A regressor then predicts the stint length. Crucially, it takes the **predicted compound** from the previous step as one of its input features.
+-   **Pros:**
+    -   Delegates the task of compound selection to a specialized classifier, potentially improving accuracy.
+    -   Makes the relationship between the chosen compound and its expected lifespan more explicit for the regression model.
+    -   Reduces the burden on the regression model to implicitly learn the compound choice.
+-   **Cons:**
+    -   Increases the number of models in the chain, adding complexity.
+    -   Errors from the compound classifier will directly impact the stint length prediction.
